@@ -43,7 +43,7 @@ def load_model_mr(model_dir):
                         "inplace": True
                     }
                       )
-    weights = torch.load('{model_dir}/fold_0/checkpoint_final.pth',
+    weights = torch.load(f'{model_dir}/fold_0/checkpoint_final.pth',
                         map_location=torch.device('cpu'),
                         weights_only=False)
     model.load_state_dict(weights["network_weights"])
