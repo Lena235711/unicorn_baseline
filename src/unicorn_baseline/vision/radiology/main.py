@@ -27,7 +27,7 @@ from unicorn_baseline.vision.radiology.models.ctfm import encode, load_model
 from unicorn_baseline.vision.radiology.models.smalldinov2 import SmallDINOv2
 from unicorn_baseline.vision.radiology.patch_extraction import extract_patches
 from picai_prep.preprocessing import Sample, PreprocessingSettings
-from unicorn_baseline.vision.radiology.models.mrsegmentator import load_model_mr
+from unicorn_baseline.vision.radiology.models.mrsegmentator import load_model_mr, encode_mr
 
 def extract_features_classification(
     model: nn.Module,
@@ -98,7 +98,10 @@ def extract_features_segmentation(
     print(f"Extracting features from patches")
     for patch, coords in tqdm(zip(patches, coordinates), total=len(patches), desc="Extracting features"):
         patch_array = sitk.GetArrayFromImage(patch)
-        features = encode(model, patch_array)
+        if domain == 'CT':
+            features = encode(model, patch_array)
+        if domain == 'MR': 
+            features = encode_mr(model, patch_array)
         patch_features.append({
             "coordinates": coords[0],
             "features": features,
@@ -205,7 +208,7 @@ def run_radiology_vision_task(
                 if 'adc' in str(image_input["input_location"]): 
                     images_to_preprocess.update({'adc' : image})
 
-            pat_case = Sample(scans=[images_to_preprocess.get('t2'), images_to_preprocess.get('hbv'), images_to_preprocess.get('adc')], settings=PreprocessingSettings(spacing=[1,1,1], matrix_size=[16,256,256]))
+            pat_case = Sample(scans=[images_to_preprocess.get('t2'), images_to_preprocess.get('hbv'), images_to_preprocess.get('adc')], settings=PreprocessingSettings(spacing=[1,1,1], matrix_size=[32,256,256]))
             pat_case.preprocess()
             
             for image in pat_case.scans:

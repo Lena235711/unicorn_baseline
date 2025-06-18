@@ -4,6 +4,7 @@ from dynamic_network_architectures.architectures.unet import PlainConvUNet
 import torch
 from monai.transforms import Compose, LoadImage, EnsureType, ScaleIntensityRange, Orientation, Resize
 from monai.data import Dataset, DataLoader
+import numpy as np
 
 def load_model_mr(model_dir):
     with open(f'{model_dir}/plans.json') as f:
@@ -58,7 +59,7 @@ def load_data(data):
     train_loader = DataLoader(train_ds, batch_size=1, shuffle=False)
     return train_loader
 
-def encode(model, patches): 
+def encode_mr(model, patches): 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     adaptive_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
