@@ -52,7 +52,7 @@ def load_model_mr(model_dir):
 
 def load_data(data): 
     train_transforms = Compose([ 
-        EnsureType(),                         
+        EnsureType(dtype=torch.float32),                         
      ])
 
     train_ds = Dataset(data=data, transform=train_transforms)

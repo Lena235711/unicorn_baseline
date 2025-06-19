@@ -77,7 +77,6 @@ def extract_features_segmentation(
     image_orientation = sitk.DICOMOrientImageFilter_GetOrientationFromDirectionCosines(image.GetDirection())
     if (image_orientation != 'SPL') and (domain == 'CT'): 
         image = sitk.DICOMOrient(image, desiredCoordinateOrientation='SPL')
-    
     if (image_orientation != 'LPS') and (domain == 'MR'): 
         image = sitk.DICOMOrient(image, desiredCoordinateOrientation='LPS')
     
@@ -92,7 +91,7 @@ def extract_features_segmentation(
         patch_spacing = image.GetSpacing()
 
     if domain == 'CT':
-        model = load_model(Path(model_dir, "ctfm")) 
+        model = load_model(Path(model_dir, "ct_fm_feature_extractor")) 
     if domain == 'MR': 
         model = load_model_mr(Path(model_dir, "mrsegmentator"))
     print(f"Extracting features from patches")
@@ -208,7 +207,7 @@ def run_radiology_vision_task(
                 if 'adc' in str(image_input["input_location"]): 
                     images_to_preprocess.update({'adc' : image})
 
-            pat_case = Sample(scans=[images_to_preprocess.get('t2'), images_to_preprocess.get('hbv'), images_to_preprocess.get('adc')], settings=PreprocessingSettings(spacing=[1,1,1], matrix_size=[32,256,256]))
+            pat_case = Sample(scans=[images_to_preprocess.get('t2'), images_to_preprocess.get('hbv'), images_to_preprocess.get('adc')], settings=PreprocessingSettings(spacing=[1,1,1], matrix_size=[48,256,256]))
             pat_case.preprocess()
             
             for image in pat_case.scans:
