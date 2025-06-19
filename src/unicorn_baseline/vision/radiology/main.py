@@ -23,47 +23,29 @@ from torch import nn
 from tqdm import tqdm
 
 from unicorn_baseline.io import resolve_image_path, write_json_file
-from unicorn_baseline.vision.radiology.models.ctfm import encode, load_model
-from unicorn_baseline.vision.radiology.models.smalldinov2 import SmallDINOv2
+from unicorn_baseline.vision.radiology.models.ctfm import SegResNetEncoder
 from unicorn_baseline.vision.radiology.patch_extraction import extract_patches
 from picai_prep.preprocessing import Sample, PreprocessingSettings
-from unicorn_baseline.vision.radiology.models.mrsegmentator import load_model_mr, encode_mr
+from unicorn_baseline.vision.radiology.models.mrsegmentator import MRSegmentator
 
 def extract_features_classification(
-    model: nn.Module,
-    dataset: torch.utils.data.Dataset,
-    device: torch.device,
-    input_size: int,
-    slug: str,
-    max_feature_length: int = 4096,
+    image,
+    model,
+    title: str = "image-level-neural-representation",
 ) -> dict:
-    model.eval()
-    with torch.no_grad():
-        batch = dataset[0]
-        scan_volume = batch["image"].to(device)
+    image_array = sitk.GetArrayFromImage(image)
+    image_features = model.encode(image_array)
 
-        patch_features = []
-        for d in range(scan_volume.shape[0]):
-            slice_ = scan_volume[d].unsqueeze(0).unsqueeze(0)
-            slice_resized = F.interpolate(
-                slice_, size=(input_size, input_size), mode="bilinear", align_corners=False
-            )
-            slice_3ch = slice_resized.repeat(1, 3, 1, 1).to(device)
-            feat = model(slice_3ch)
-            patch_features.append(feat.squeeze(0).cpu())
-
-        image_level_feature = torch.stack(patch_features).mean(dim=0)
-        feature_list = image_level_feature.tolist()[:max_feature_length]
-
-        return {
-            "title": slug,
-            "features": feature_list
-        }
+    image_level_neural_representation = make_patch_level_neural_representation(
+        image_features=image_features,
+        title=title,
+    )
+    return image_level_neural_representation
 
 
 def extract_features_segmentation(
     image,
-    model_dir: str,
+    model,
     domain: str,
     title: str = "patch-level-neural-representation",
     patch_size: list[int] = [16, 128, 128],
@@ -90,24 +72,17 @@ def extract_features_segmentation(
     if patch_spacing is None:
         patch_spacing = image.GetSpacing()
 
-    if domain == 'CT':
-        model = load_model(Path(model_dir, "ct_fm_feature_extractor")) 
-    if domain == 'MR': 
-        model = load_model_mr(Path(model_dir, "mrsegmentator"))
     print(f"Extracting features from patches")
     for patch, coords in tqdm(zip(patches, coordinates), total=len(patches), desc="Extracting features"):
         patch_array = sitk.GetArrayFromImage(patch)
-        if domain == 'CT':
-            features = encode(model, patch_array)
-        if domain == 'MR': 
-            features = encode_mr(model, patch_array)
+        features = model.encode(patch_array)
         patch_features.append({
             "coordinates": coords[0],
             "features": features,
         })
 
     patch_level_neural_representation = make_patch_level_neural_representation(
-        patch_features=patch_features,
+        image_features=patch_features,
         patch_size=patch_size,
         patch_spacing=patch_spacing,
         image_size=image.GetSize(),
@@ -122,30 +97,36 @@ def extract_features_segmentation(
 def make_patch_level_neural_representation(
     *,
     title: str,
-    patch_features: Iterable[dict],
-    patch_size: Iterable[int],
-    patch_spacing: Iterable[float],
-    image_size: Iterable[int],
-    image_spacing: Iterable[float],
+    image_features: Iterable[dict],
+    patch_size: Iterable[int] = None,
+    patch_spacing: Iterable[float] = None,
+    image_size: Iterable[int] = None,
+    image_spacing: Iterable[float] = None,
     image_origin: Iterable[float] = None,
     image_direction: Iterable[float] = None,
 ) -> dict:
-    if image_origin is None:
-        image_origin = [0.0] * len(image_size)
-    if image_direction is None:
-        image_direction = np.identity(len(image_size)).flatten().tolist()
-    return {
-        "meta": {
-            "patch-size": list(patch_size),
-            "patch-spacing": list(patch_spacing),
-            "image-size": list(image_size),
-            "image-origin": list(image_origin),
-            "image-spacing": list(image_spacing),
-            "image-direction": list(image_direction),
-        },
-        "patches": list(patch_features),
-        "title": title,
-    }
+    if "patch" in title:
+        if image_origin is None:
+            image_origin = [0.0] * len(image_size)
+        if image_direction is None:
+            image_direction = np.identity(len(image_size)).flatten().tolist()
+        return {
+            "meta": {
+                "patch-size": list(patch_size),
+                "patch-spacing": list(patch_spacing),
+                "image-size": list(image_size),
+                "image-origin": list(image_origin),
+                "image-spacing": list(image_spacing),
+                "image-direction": list(image_direction),
+            },
+            "patches": list(image_features),
+            "title": title,
+        }
+    else: 
+        return {
+            "title": title,
+            "features": image_features
+        }
 
 
 def run_radiology_vision_task(
@@ -161,77 +142,61 @@ def run_radiology_vision_task(
         if input_socket["interface"]["kind"] == "Image":
             image_inputs.append(input_socket)
 
-    if task_type == "classification":
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        model = SmallDINOv2(model_dir=Path(model_dir, "SmallDINOv2"), use_safetensors=True).to(device)
+    if domain == 'CT':
+        model = SegResNetEncoder(Path(model_dir, "ct_fm_feature_extractor")) 
+    if domain == 'MR': 
+        model = MRSegmentator(Path(model_dir, "mrsegmentator"))
 
-        outputs = []
+    output_dir = Path("/output")
+    neural_representations = []
+
+    if image_inputs[0]['interface']['slug'].endswith('prostate-mri'):
+        images_to_preprocess = {}
         for image_input in image_inputs:
-            slug = image_input["interface"]["slug"]
-            image_dir = Path(image_input["input_location"])
-            scan_path = next(image_dir.glob("*.mha"), None)
-            if scan_path is None:
-                continue
+            image_path = resolve_image_path(location=image_input["input_location"])
+            print(f"Reading image from {image_path}")
+            image = sitk.ReadImage(str(image_path))
 
-            from unicorn_baseline.vision.radiology.dataset import get_scan_dataset
-            dataset = get_scan_dataset(scan_path, seed=42)
+            if 't2' in str(image_input["input_location"]): 
+                images_to_preprocess.update({'t2' : image})
+            if 'hbv' in str(image_input["input_location"]): 
+                images_to_preprocess.update({'hbv' : image})
+            if 'adc' in str(image_input["input_location"]): 
+                images_to_preprocess.update({'adc' : image})
 
-            result = extract_features_classification(
-                model=model,
-                dataset=dataset,
-                device=device,
-                input_size=518,
-                slug=slug
-            )
-            outputs.append(result)
-
-        output_dir = Path("/output")
-        output_path = output_dir / "image-neural-representation.json"
-        write_json_file(location=output_path, content=outputs)
-
-    elif task_type in ["detection", "segmentation"]:
-        output_dir = Path("/output")
-        neural_representations = []
-
-        if image_inputs[0]['interface']['slug'].endswith('prostate-mri'):
-            images_to_preprocess = {}
-            for image_input in image_inputs:
-                image_path = resolve_image_path(location=image_input["input_location"])
-                print(f"Reading image from {image_path}")
-                image = sitk.ReadImage(str(image_path))
-
-                if 't2' in str(image_input["input_location"]): 
-                    images_to_preprocess.update({'t2' : image})
-                if 'hbv' in str(image_input["input_location"]): 
-                    images_to_preprocess.update({'hbv' : image})
-                if 'adc' in str(image_input["input_location"]): 
-                    images_to_preprocess.update({'adc' : image})
-
-            pat_case = Sample(scans=[images_to_preprocess.get('t2'), images_to_preprocess.get('hbv'), images_to_preprocess.get('adc')], settings=PreprocessingSettings(spacing=[1,1,1], matrix_size=[48,256,256]))
-            pat_case.preprocess()
+        pat_case = Sample(scans=[images_to_preprocess.get('t2'), images_to_preprocess.get('hbv'), images_to_preprocess.get('adc')], settings=PreprocessingSettings(spacing=[1,1,1], matrix_size=[48,256,256]))
+        pat_case.preprocess()
             
-            for image in pat_case.scans:
-                neural_representation = extract_features_segmentation(
+        for image in pat_case.scans:
+            neural_representation = extract_features_segmentation(
                         image=image,
-                        model_dir=model_dir, 
+                        model=model, 
                         domain=domain,
                         title=image_input["interface"]["slug"]
                 )
-                neural_representations.append(neural_representation)
+            neural_representations.append(neural_representation)
+    else: 
+        for image_input in image_inputs:
+            image_path = resolve_image_path(location=image_input["input_location"])
+            print(f"Reading image from {image_path}")
+            image = sitk.ReadImage(str(image_path))
 
-        else: 
-            for image_input in image_inputs:
-                image_path = resolve_image_path(location=image_input["input_location"])              
-                print(f"Reading image from {image_path}")
-                image = sitk.ReadImage(str(image_path))
-
+            if task_type == "classification": 
+                neural_representation = extract_features_classification(
+                        image=image,
+                        model=model, 
+                        title=image_input["interface"]["slug"]
+                    )
+            else:
                 neural_representation = extract_features_segmentation(
-                    image=image,
-                    model_dir=model_dir, 
-                    domain=domain,
-                    title=image_input["interface"]["slug"]
-                )
-                neural_representations.append(neural_representation)
-
+                        image=image,
+                        model=model, 
+                        domain=domain,
+                        title=image_input["interface"]["slug"]
+                    )
+            neural_representations.append(neural_representation)
+    if task_type == "classification": 
+        output_path = output_dir / "image-neural-representation.json"
+    else:
         output_path = output_dir / "patch-neural-representation.json"
-        write_json_file(location=output_path, content=neural_representations)
+    write_json_file(location=output_path, content=neural_representations)
