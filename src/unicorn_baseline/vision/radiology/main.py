@@ -105,7 +105,7 @@ def make_patch_level_neural_representation(
     image_origin: Iterable[float] = None,
     image_direction: Iterable[float] = None,
 ) -> dict:
-    if "patch" in title:
+    if patch_size is not None:
         if image_origin is None:
             image_origin = [0.0] * len(image_size)
         if image_direction is None:
