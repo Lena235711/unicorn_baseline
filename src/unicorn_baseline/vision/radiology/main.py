@@ -48,7 +48,7 @@ def extract_features_segmentation(
     model,
     domain: str,
     title: str = "patch-level-neural-representation",
-    patch_size: list[int] = [16, 128, 128],
+    patch_size: list[int] = [16, 64, 64],
     patch_spacing: list[float] | None = None,
 ) -> list[dict]:
     """
@@ -164,7 +164,7 @@ def run_radiology_vision_task(
             if 'adc' in str(image_input["input_location"]): 
                 images_to_preprocess.update({'adc' : image})
 
-        pat_case = Sample(scans=[images_to_preprocess.get('t2'), images_to_preprocess.get('hbv'), images_to_preprocess.get('adc')], settings=PreprocessingSettings(spacing=[1,1,1], matrix_size=[48,256,256]))
+        pat_case = Sample(scans=[images_to_preprocess.get('t2'), images_to_preprocess.get('hbv'), images_to_preprocess.get('adc')], settings=PreprocessingSettings(spacing=[3,1.5,1.5], matrix_size=[16,256,256]))
         pat_case.preprocess()
             
         for image in pat_case.scans:
