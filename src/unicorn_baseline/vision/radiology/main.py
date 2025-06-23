@@ -31,8 +31,13 @@ from unicorn_baseline.vision.radiology.models.mrsegmentator import MRSegmentator
 def extract_features_classification(
     image,
     model,
+    domain: str,
     title: str = "image-level-neural-representation",
 ) -> dict:
+    image_orientation = sitk.DICOMOrientImageFilter_GetOrientationFromDirectionCosines(image.GetDirection())
+    if (image_orientation != 'SPL') and (domain == 'CT'): 
+        image = sitk.DICOMOrient(image, desiredCoordinateOrientation='SPL')
+
     image_array = sitk.GetArrayFromImage(image)
     image_features = model.encode(image_array)
 
@@ -185,6 +190,7 @@ def run_radiology_vision_task(
                 neural_representation = extract_features_classification(
                         image=image,
                         model=model, 
+                        domain=domain,
                         title=image_input["interface"]["slug"]
                     )
             else:
