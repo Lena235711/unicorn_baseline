@@ -77,14 +77,25 @@ def extract_features_segmentation(
     if patch_spacing is None:
         patch_spacing = image.GetSpacing()
 
+    MAX_LEN = 1024
     print(f"Extracting features from patches")
     for patch, coords in tqdm(zip(patches, coordinates), total=len(patches), desc="Extracting features"):
         patch_array = sitk.GetArrayFromImage(patch)
-        features = model.encode(patch_array)
-        patch_features.append({
-            "coordinates": coords[0],
-            "features": features,
-        })
+        full_feat = model.encode(patch_array)
+
+        n = (len(full_feat) + MAX_LEN - 1) // MAX_LEN
+
+        for i in range(n):
+            start = i * MAX_LEN
+            end   = min(start + MAX_LEN, len(full_feat))
+            chunk = full_feat[start:end]
+
+            # build a new 4-coordinate: [x, y, z, chunk_index]
+            coord4 = coords[0] + (i,)
+            patch_features.append({
+                "coordinates": coord4,
+                "features":    chunk
+            })
 
     patch_level_neural_representation = make_patch_level_neural_representation(
         image_features=patch_features,

@@ -75,7 +75,7 @@ class MRSegmentator:
                 input = input.to(device)
                 output = self.model.encoder(input) 
                 #average pool and flatten the output to fit feature vector requirements
-                output_flat = self.adaptive_pool(output[-1])
-                out_flat = output_flat.flatten(start_dim =0)
+                #output_flat = self.adaptive_pool(output[-1])
+                out_flat = output[-1].flatten(start_dim =0)
 
         return out_flat.cpu().detach().numpy().tolist()
