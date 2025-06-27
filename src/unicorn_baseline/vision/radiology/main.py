@@ -209,7 +209,8 @@ def run_radiology_vision_task(
                         image=image,
                         model=model, 
                         domain=domain,
-                        title=image_input["interface"]["slug"]
+                        title=image_input["interface"]["slug"], 
+                        patch_size=[16,128,128]
                     )
             neural_representations.append(neural_representation)
     if task_type == "classification": 
